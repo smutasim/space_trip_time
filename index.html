@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Deep Space Trip Time Estimator</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#121936; --muted:#8ea0c9; --text:#eaf1ff; --accent:#6ee7ff; --accent2:#a78bfa;
+    --danger:#ff6b6b; --ok:#22c55e;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0; font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif; color:var(--text); background:radial-gradient(1200px 800px at 20% -10%, #1a2558 0%, #0b1020 60%);} 
+  a{color:var(--accent)}
+  .app{display:grid; grid-template-columns: 360px 1fr; gap:20px; max-width:1200px; margin:24px auto; padding:0 16px}
+  .sidebar{background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:18px 18px 22px; backdrop-filter: blur(6px);} 
+  .main{display:grid; gap:16px}
+  h1{margin:0 0 8px; font-size:28px; letter-spacing:0.3px}
+  .muted{color:var(--muted)}
+  .card{background: var(--panel); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:16px; box-shadow: 0 10px 30px rgba(0,0,0,0.25)}
+  .row{display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px}
+  .row3{display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:12px}
+  label{font-size:12px; color:var(--muted)}
+  select,input{width:100%; padding:10px 12px; border-radius:12px; background:#0f1630; color:var(--text); border:1px solid rgba(255,255,255,0.12)}
+  input[type="number"]{appearance:textfield}
+  button{padding:12px 14px; border-radius:14px; background:linear-gradient(135deg, var(--accent), var(--accent2)); color:#051026; font-weight:700; border:none; cursor:pointer; box-shadow: 0 10px 22px rgba(103, 232, 249, 0.2)}
+  .split{display:grid; grid-template-columns: 1fr 1fr; gap:14px}
+  .result{font-size:15px; line-height:1.5}
+  .badge{display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; border:1px solid rgba(255,255,255,0.12); background:#0f1630; margin-left:6px; color:var(--muted)}
+  .warn{color:var(--danger)}
+  .ok{color:var(--ok)}
+  .hint{font-size:12px; color:var(--muted)}
+  .grid{display:grid; gap:12px}
+  .flex{display:flex; gap:10px; align-items:center}
+  .hidden{display:none}
+  .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
+</style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <h1>Deep Space Trip Time Estimator</h1>
+      <p class="muted">Quick, order-of-magnitude travel times across the Solar System and to nearby stars. This tool treats space like a straight road between two points and ignores gravity and orbital mechanics.</p>
+      <ul>
+        <li><b>Geometry:</b> straight line between objects. No gravity assists, no curved paths.</li>
+        <li><b>Acceleration mode:</b> start at 0 km/s, accelerate for half the distance, then decelerate symmetrically to arrive at 0 km/s.</li>
+        <li><b>Impulse mode:</b> two instantaneous burns (start/stop) that sum to total Δv. Coasts at cruise speed between.</li>
+        <li><b>Conjunction/opposition:</b> If both start and end are within <b>10 AU</b> of the Sun, the result shows a <i>range</i> using minimum distance and maximum distance.</li>
+        <li><b>Relativity:</b> if peak speed ≥ <b>1% of c</b>, the model reduces coordinate acceleration with γ and also reports the traveler’s experienced time.</li>
+        <li><b>Discretization:</b> acceleration scenarios integrate over <b>101</b> equally spaced segments.</li>
+      </ul>
+      <p class="hint">This is a simplified educational model. Real mission design must use n-body dynamics and precise navigation.</p>
+    </aside>
+
+    <main class="main">
+      <div class="card grid">
+        <div class="row">
+          <div>
+            <label for="start">Start</label>
+            <select id="start"></select>
+          </div>
+          <div>
+            <label for="end">Destination</label>
+            <select id="end"></select>
+          </div>
+        </div>
+
+        <div id="customDistanceBlock" class="row hidden">
+          <div>
+            <label for="customDistance">Custom object's distance to Sun</label>
+            <input id="customDistance" type="number" step="any" min="0" placeholder="e.g., 1.2" />
+          </div>
+          <div>
+            <label for="customDistanceUnit">Unit</label>
+            <select id="customDistanceUnit">
+              <option value="km">km</option>
+              <option value="au" selected>AU</option>
+              <option value="ly">ly</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="card" style="background:transparent; border:none; padding:0">
+          <div class="row3">
+            <div>
+              <label for="mode">Mode</label>
+              <select id="mode">
+                <option value="accel">Acceleration</option>
+                <option value="impulse">Impulse (Δv)</option>
+                <option value="custom">Custom preset</option>
+              </select>
+            </div>
+            <div id="accelInputs">
+              <label for="accelVal">Acceleration</label>
+              <div class="row" style="grid-template-columns:1fr 140px">
+                <input id="accelVal" type="number" step="any" min="0" placeholder="e.g., 0.01" />
+                <select id="accelUnit">
+                  <option value="mps2" selected>m/s²</option>
+                  <option value="g">g</option>
+                </select>
+              </div>
+            </div>
+            <div id="impulseInputs" class="hidden">
+              <label for="dvVal">Total Δv</label>
+              <div class="row" style="grid-template-columns:1fr 140px">
+                <input id="dvVal" type="number" step="any" min="0" placeholder="e.g., 40" />
+                <select id="dvUnit">
+                  <option value="kmps" selected>km/s</option>
+                  <option value="cfrac">fraction of c</option>
+                </select>
+              </div>
+            </div>
+            <div id="customInputs" class="hidden">
+              <label for="customPreset">Preset</label>
+              <div class="row" style="grid-template-columns:1fr 1fr">
+                <select id="customPreset">
+                  <option value="sail_accel">Solar sail (accel)</option>
+                  <option value="chem_imp">Chemical rocket (Δv)</option>
+                  <option value="fission_imp">Nuclear fission thermal (Δv)</option>
+                  <option value="fusion_imp">Fusion concept (Δv)</option>
+                  <option value="orion_accel">Nuclear pulse (accel)</option>
+                  <option value="antimatter_imp">Antimatter concept (Δv)</option>
+                </select>
+                <div class="flex"><span class="hint" id="presetNote"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex" style="justify-content:space-between">
+          <div class="hint">Speed must be &lt; c. Units convert automatically.</div>
+          <button id="calcBtn">Calculate</button>
+        </div>
+      </div>
+
+      <div class="card split">
+        <div>
+          <h3 style="margin:0 0 10px">Results <span class="badge" id="relBadge">non‑relativistic</span></h3>
+          <div id="results" class="result muted">Enter inputs and click <b>Calculate</b>.</div>
+        </div>
+        <div>
+          <h3 style="margin:0 0 10px">Details</h3>
+          <div id="details" class="result mono muted"></div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+<script>
+(function(){
+  const c = 299792458; // m/s
+  const c_kmps = c/1000; // km/s
+  const AU_km = 149597870.7; // km
+  const LY_km = 9.4607e12; // km
+  const LY_AU = LY_km / AU_km; 
+  const SEC_PER_MIN = 60;
+  const SEC_PER_HOUR = 3600;
+  const SEC_PER_DAY = 86400;
+  const DAYS_PER_YEAR = 365.25;
+  const SEC_PER_MONTH = 30.44 * SEC_PER_DAY;
+  const SEC_PER_YEAR = DAYS_PER_YEAR*SEC_PER_DAY;
+
+  // Catalog: distances to Sun (r) in AU unless otherwise noted.
+  const bodies = [
+    // Planets
+    {name:"Mercury", r_au:0.387},
+    {name:"Venus", r_au:0.723},
+    {name:"Earth", r_au:1.0},
+    // {name:"Moon", r_au:1.0, note:"≈ Earth's distance"},
+    {name:"Mars", r_au:1.524},
+    {name:"Ceres", r_au:2.77},
+    {name:"Jupiter", r_au:5.203},
+    {name:"Saturn", r_au:9.537},
+    {name:"Uranus", r_au:19.191},
+    {name:"Neptune", r_au:30.07},
+    {name:"Pluto", r_au:39.48},
+    // Nearby stars (distance to Sun in light‑years)
+    {name:"Proxima Centauri", r_ly:4.2465},
+    {name:"Alpha Centauri A/B", r_ly:4.367},
+    {name:"Barnard's Star", r_ly:5.963},
+    {name:"Wolf 359", r_ly:7.86},
+    {name:"Sirius", r_ly:8.60},
+    {name:"Lalande 21185", r_ly:8.31},
+    {name:"Ross 154", r_ly:9.69},
+    {name:"Epsilon Eridani", r_ly:10.5},
+    {name:"Epsilon Indi", r_ly:11.8},
+    {name:"Tau Ceti", r_ly:11.9}
+  ];
+
+  function bodyDistanceKm(b){
+    if(b.r_au != null) return b.r_au * AU_km;
+    if(b.r_ly != null) return b.r_ly * LY_AU * AU_km;
+    return 0;
+  }
+
+  // Build dropdowns
+  const startSel = document.getElementById('start');
+  const endSel = document.getElementById('end');
+  function populateDropdown(sel){
+    const group1 = document.createElement('optgroup'); group1.label = 'Planets & dwarf';
+    const group2 = document.createElement('optgroup'); group2.label = 'Nearby stars';
+    bodies.forEach(b => {
+        const opt = document.createElement('option');
+        opt.value = b.name;
+        opt.textContent = b.name;
+        if (b.r_au && b.r_au <= 40) {
+            group1.appendChild(opt);} else {group2.appendChild(opt);}
+        });
+    const custom = document.createElement('option'); custom.value='Custom'; custom.textContent='Custom…';
+    sel.appendChild(group1); sel.appendChild(group2); sel.appendChild(custom);
+  }
+  populateDropdown(startSel); populateDropdown(endSel);
+
+  const customDistanceBlock = document.getElementById('customDistanceBlock');
+  function updateCustomDistanceVisibility(){
+    const s = startSel.value, e = endSel.value;
+    const needs = (s==='Custom') || (e==='Custom');
+    customDistanceBlock.classList.toggle('hidden', !needs);
+  }
+  startSel.addEventListener('change', updateCustomDistanceVisibility);
+  endSel.addEventListener('change', updateCustomDistanceVisibility);
+  updateCustomDistanceVisibility();
+
+  // Mode handling
+  const modeSel = document.getElementById('mode');
+  const accelInputs = document.getElementById('accelInputs');
+  const impulseInputs = document.getElementById('impulseInputs');
+  const customInputs = document.getElementById('customInputs');
+  const presetNote = document.getElementById('presetNote');
+
+  const presets = {
+    // Acceleration presets (finite burn, symmetric accel/decel)
+    sail_accel: {kind:'accel', a_mps2: 5e-4, note:'Solar sail ~0.0005 m/s²'},
+    orion_accel: {kind:'accel', a_mps2: 1.0, note:'Nuclear pulse ~1 m/s² (concept)'},
+    // Impulse presets (instant burns)
+    chem_imp: {kind:'impulse', dv_kmps: 12, note:'Chemical rocket total Δv ≈ 12 km/s'},
+    fission_imp: {kind:'impulse', dv_kmps: 50, note:'Nuclear thermal Δv ≈ 50 km/s'},
+    fusion_imp: {kind:'impulse', dv_kmps: 1000, note:'Fusion concept Δv ≈ 1000 km/s (~0.0033c)'},
+    antimatter_imp: {kind:'impulse', dv_frac_c: 0.1, note:'Antimatter concept Δv ≈ 0.1c'}
+  };
+
+  function updateMode(){
+    const m = modeSel.value;
+    accelInputs.classList.toggle('hidden', m!=='accel');
+    impulseInputs.classList.toggle('hidden', m!=='impulse');
+    customInputs.classList.toggle('hidden', m!=='custom');
+    if(m==='custom'){
+      updatePresetNote();
+    }
+  }
+  modeSel.addEventListener('change', updateMode); updateMode();
+
+  document.getElementById('customPreset').addEventListener('change', updatePresetNote);
+  function updatePresetNote(){
+    const key = document.getElementById('customPreset').value;
+    const p = presets[key];
+    presetNote.textContent = p? p.note : '';
+  }
+  updatePresetNote();
+
+  // Helpers
+  function kmFromInputDistance(){
+    const val = parseFloat(document.getElementById('customDistance').value || '0');
+    const unit = document.getElementById('customDistanceUnit').value;
+    if(!isFinite(val) || val<0) return null;
+    if(unit==='km') return val;
+    if(unit==='au') return val*AU_km;
+    if(unit==='ly') return val*LY_km;
+    return null;
+  }
+  function toKmPerSecDisplay(v_mps){
+    const v_kmps = v_mps/1000;
+    const frac = v_mps/c;
+    if(v_kmps >= 1000) return `${(frac).toFixed(4)} c`;
+    return `${v_kmps.toFixed(3)} km/s` + (frac>=0.01? ` (${(frac).toFixed(4)} c)` : '');
+  }
+  function formatDuration(sec){
+    if(!isFinite(sec) || sec<0) return '—';
+    if(sec < 2*SEC_PER_DAY) return `${(sec/SEC_PER_DAY).toFixed(2)} days`;
+    const years = sec/SEC_PER_YEAR;
+    if(years < 1) return `${(sec/(30.44*SEC_PER_DAY)).toFixed(2)} months`;
+    return `${years.toFixed(2)} years`;
+  }
+  function formatDuration(sec) {
+    if (!isFinite(sec) || sec < 0) return '—';
+    if (sec < SEC_PER_MIN) return `${sec.toFixed(2)} s`;
+    if (sec < SEC_PER_HOUR) return `${(sec / SEC_PER_MIN).toFixed(2)} min`;
+    if (sec < SEC_PER_DAY) return `${(sec / SEC_PER_HOUR).toFixed(2)} h`;
+    if (sec < SEC_PER_MONTH) return `${(sec / SEC_PER_DAY).toFixed(2)} days`;
+    if (sec < SEC_PER_YEAR) return `${(sec / SEC_PER_MONTH).toFixed(2)} months`;
+    return `${(sec / SEC_PER_YEAR).toFixed(2)} years`;
+  }
+  function gammaFromV(v){return 1/Math.sqrt(1-(v*v)/(c*c));}
+
+  function getBodyByName(name){return bodies.find(b=>b.name===name);} 
+
+  function pairDistancesKm(startName,endName, customKm){
+    // Returns {d_min, d_max, ranged}
+    const s = startName==='Custom'? {r_km: customKm} : {r_km: bodyDistanceKm(getBodyByName(startName))};
+    const e = endName==='Custom'? {r_km: customKm} : {r_km: bodyDistanceKm(getBodyByName(endName))};
+
+    const d_min = Math.abs(e.r_km - s.r_km);
+    const d_max = e.r_km + s.r_km;
+    const ranged = d_min <= 10*AU_km; // within 10 AU of each other
+    return {d_min, d_max: ranged? d_max : d_min, ranged};
+  }
+
+  // Acceleration half-trip integrator over distance with 101 segments
+  function accelHalf(distance_m, a_mps2){
+    const segments = 101;
+    const ds = distance_m / segments;
+    let v = 0; // m/s
+    let t = 0; // seconds
+    let tau = 0; // proper time seconds
+    let vMax = 0;
+    for(let i=0;i<segments;i++){
+      const gamma = gammaFromV(v);
+      const a_eff = (v/c >= 0.01) ? (a_mps2 / (gamma*gamma*gamma)) : a_mps2; // switch to relativistic regime above 0.01c
+      // Kinematics step: v_next^2 = v^2 + 2 a_eff ds
+      let v2 = v*v + 2*a_eff*ds;
+      let v_next = Math.sqrt(Math.max(0, v2));
+      if(v_next >= 0.999999*c){ v_next = 0.999999*c; }
+      const dv = v_next - v;
+      const a_step = (dv>0) ? (dv/(ds/Math.max(v_next,1e-9))) : a_eff; // fallback
+      const dt = dv>0 ? dv/Math.max(a_eff,1e-12) : (ds/Math.max(v_next,1e-9));
+      const gamma_mid = gammaFromV((v+v_next)/2);
+      const dtau = dt / gamma_mid;
+      t += dt; tau += dtau; v = v_next; if(v>vMax) vMax=v;
+    }
+    return {t, tau, vMax};
+  }
+
+  function doAcceleration(distance_km, a_mps2){
+    const half_m = (distance_km*1000)/2;
+    const up = accelHalf(half_m, a_mps2);
+    // mirror back down: same t and tau, peak speed the same
+    const T = up.t * 2;
+    const Tau = up.tau * 2;
+    const vmax = up.vMax;
+    return {T, Tau, vmax};
+  }
+
+  function doImpulse(distance_km, dv_kmps){
+    // symmetric: burn half at start, half at end; cruise in between at vmax = dv/2
+    const vmax_kmps = dv_kmps/2;
+    const vmax_mps = vmax_kmps*1000;
+    if(vmax_mps >= c){ return {error:"Cruise speed would be ≥ c"}; }
+    const T = (distance_km) / Math.max(vmax_kmps,1e-9); // seconds because km / (km/s)
+    const gamma = gammaFromV(vmax_mps);
+    const Tau = (vmax_mps/c >= 0.01) ? (T/gamma) : T; // traveler time (ignoring brief burns)
+    return {T, Tau, vmax:vmax_mps};
+  }
+
+  function parseAccel(){
+    const val = parseFloat(document.getElementById('accelVal').value||'0');
+    const unit = document.getElementById('accelUnit').value;
+    if(!(val>0)) return null;
+    return unit==='g' ? val*9.80665 : val; // m/s²
+  }
+  function parseDv(){
+    const val = parseFloat(document.getElementById('dvVal').value||'0');
+    const unit = document.getElementById('dvUnit').value;
+    if(!(val>0)) return null;
+    return unit==='cfrac' ? val*c_kmps : val; // km/s
+  }
+
+  const resultsDiv = document.getElementById('results');
+  const detailsDiv = document.getElementById('details');
+  const relBadge = document.getElementById('relBadge');
+
+  function compute(){
+    resultsDiv.classList.remove('warn');
+    resultsDiv.innerHTML = '';
+    detailsDiv.textContent='';
+
+    // Distance(s)
+    const sName = startSel.value; const eName = endSel.value;
+    let customKm = 0;
+    if(sName==='Custom' || eName==='Custom'){
+      const v = kmFromInputDistance();
+      if(v==null || v<=0){
+        resultsDiv.innerHTML = '<span class="warn">Enter a valid custom distance to the Sun.</span>';
+        return;
+      }
+      customKm = v;
+    }
+    const {d_min, d_max, ranged} = pairDistancesKm(sName,eName,customKm);
+    if(d_min===0 && d_max===0){
+      resultsDiv.innerHTML = 'Start and destination are the same. Duration: 0.'; return;
+    }
+
+    // Mode
+    const mode = modeSel.value;
+    let outputs = [];
+
+    if(mode==='accel' || (mode==='custom' && presets[document.getElementById('customPreset').value].kind==='accel')){
+      const a = (mode==='accel') ? parseAccel() : presets[document.getElementById('customPreset').value].a_mps2;
+      if(!(a>0)){ resultsDiv.innerHTML = '<span class="warn">Provide a valid acceleration.</span>'; return; }
+      // Compute for min and max if ranged
+      const doOne = (Dkm)=>{
+        const out = doAcceleration(Dkm, a);
+        return {...out, relativity: (out.vmax/c)>=0.01 };
+      };
+      if(ranged){
+        const a1 = doOne(d_min); const a2 = doOne(d_max);
+        outputs = [ {label:'Conjunction (min distance)', ...a1}, {label:'Opposition (max distance)', ...a2} ];
+      } else {
+        outputs = [ {label:'Straight-line distance', ...doOne(d_min)} ];
+      }
+    } else if(mode==='impulse' || (mode==='custom' && presets[document.getElementById('customPreset').value].kind==='impulse')){
+      const dv_kmps = (mode==='impulse') ? parseDv() : (presets[document.getElementById('customPreset').value].dv_kmps ?? presets[document.getElementById('customPreset').value].dv_frac_c*c_kmps);
+      if(!(dv_kmps>0)){ resultsDiv.innerHTML = '<span class="warn">Provide a valid total Δv.</span>'; return; }
+      const vmax_mps = (dv_kmps/2)*1000; if(vmax_mps>=c){ resultsDiv.innerHTML = '<span class="warn">Δv implies cruise ≥ c. Reduce Δv.</span>'; return; }
+      const doOne = (Dkm)=>{
+        const out = doImpulse(Dkm, dv_kmps); out.relativity = (out.vmax/c)>=0.01; return out;
+      }
+      if(ranged){
+        outputs = [ {label:'Conjunction (min distance)', ...doOne(d_min)}, {label:'Opposition (max distance)', ...doOne(d_max)} ];
+      } else {
+        outputs = [ {label:'Straight-line distance', ...doOne(d_min)} ];
+      }
+    }
+
+    // Render
+    const relAny = outputs.some(o=>o.relativity);
+    relBadge.textContent = relAny? 'relativistic effects on' : 'non‑relativistic';
+
+    let distLine;
+    if (d_min / AU_km > 1e5) {
+    // Use light‑years for large distances
+    distLine = ranged
+        ? `Distance range: ${(d_min / LY_km).toFixed(3)}–${(d_max / LY_km).toFixed(3)} ly`
+        : `Distance: ${(d_min / LY_km).toFixed(3)} ly`;
+    } else {
+    // Use AU for smaller distances
+    distLine = ranged
+        ? `Distance range: ${(d_min / AU_km).toFixed(3)}–${(d_max / AU_km).toFixed(3)} AU`
+        : `Distance: ${(d_min / AU_km).toFixed(3)} AU`;
+    }
+
+    let html = `<div>${distLine}</div>`;
+    html += '<div style="margin-top:10px">';
+    outputs.forEach(o=>{
+      const maxV = toKmPerSecDisplay(o.vmax);
+      const T = formatDuration(o.T);
+      const Tau = o.relativity ? formatDuration(o.Tau) : null;
+      html += `<div style="margin:10px 0; padding:10px; border-radius:12px; background:#0f1630;">`+
+              `<div><b>${o.label}</b></div>`+
+              `<div>Duration (lab frame): <b>${T}</b></div>`+
+              (Tau? `<div>Traveler duration: <b>${Tau}</b></div>`:'')+
+              `<div>Max speed: <b>${maxV}</b></div>`+
+              `</div>`;
+    });
+    html += '</div>';
+    resultsDiv.innerHTML = html;
+
+    // Details
+    let det = '';
+    det += `Start: ${sName} | End: ${eName}\n`;
+    det += `${distLine}\n`;
+    const modeName = (mode==='accel')? 'Acceleration' : (mode==='impulse')? 'Impulse (Δv)' : `Custom: ${document.getElementById('customPreset').value}`;
+    det += `Mode: ${modeName}\n`;
+    if(mode==='accel'){
+      det += `Input accel: ${parseFloat(document.getElementById('accelVal').value||'0')} ${document.getElementById('accelUnit').value==='g'?'g':'m/s²'}\n`;
+    }
+    if(mode==='impulse'){
+      det += `Input Δv: ${parseFloat(document.getElementById('dvVal').value||'0')} ${document.getElementById('dvUnit').value==='cfrac'?'×c':'km/s'}\n`;
+    }
+    resultsDiv.scrollIntoView({behavior:'smooth', block:'start'});
+    detailsDiv.innerText = det;
+  }
+
+  document.getElementById('calcBtn').addEventListener('click', compute);
+})();
+</script>
+</body>
+</html>
