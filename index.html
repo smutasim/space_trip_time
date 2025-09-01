@@ -35,6 +35,13 @@
   .flex{display:flex; gap:10px; align-items:center}
   .hidden{display:none}
   .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
+  @media (max-width: 1000px) {
+  .app {    grid-template-columns: 1fr; }
+  .split {    grid-template-columns: 1fr; }
+  .row, .row3 {    grid-template-columns: 1fr !important;  }
+  .row input, .row select {    width: 100%;  }
+  }
+
 </style>
 </head>
 <body>
@@ -93,7 +100,7 @@
             </div>
             <div id="accelInputs">
               <label for="accelVal">Acceleration</label>
-              <div class="row" style="grid-template-columns:1fr 140px">
+              <div class="row" style="grid-template-columns:1fr 100px">
                 <input id="accelVal" type="number" step="any" min="0" placeholder="e.g., 0.01" />
                 <select id="accelUnit">
                   <option value="mps2" selected>m/s²</option>
@@ -103,7 +110,7 @@
             </div>
             <div id="impulseInputs" class="hidden">
               <label for="dvVal">Total Δv</label>
-              <div class="row" style="grid-template-columns:1fr 140px">
+              <div class="row" style="grid-template-columns:1fr 100px">
                 <input id="dvVal" type="number" step="any" min="0" placeholder="e.g., 40" />
                 <select id="dvUnit">
                   <option value="kmps" selected>km/s</option>
