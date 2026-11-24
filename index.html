@@ -173,7 +173,8 @@
   const REL_THRESHOLD = 0.01; // fraction of c at which relativistic output is shown
   const RANGE_LIMIT_KM = 10 * AU_km; // objects closer than this get a conjunction/opposition range
 
-  // Catalog: distances to Sun (r) in AU or light-years.
+  // Catalog: distances to Sun (r) in AU or light-years. Stars also carry J2000 RA/Dec (degrees) so
+  // star-to-star distances use their true 3D separation.
   const bodies = [
     {name:"Mercury", r_au:0.387},
     {name:"Venus", r_au:0.723},
@@ -185,16 +186,16 @@
     {name:"Uranus", r_au:19.191},
     {name:"Neptune", r_au:30.07},
     {name:"Pluto", r_au:39.48},
-    {name:"Proxima Centauri", r_ly:4.2465},
-    {name:"Alpha Centauri A/B", r_ly:4.367},
-    {name:"Barnard's Star", r_ly:5.963},
-    {name:"Wolf 359", r_ly:7.86},
-    {name:"Lalande 21185", r_ly:8.31},
-    {name:"Sirius", r_ly:8.60},
-    {name:"Ross 154", r_ly:9.69},
-    {name:"Epsilon Eridani", r_ly:10.5},
-    {name:"Epsilon Indi", r_ly:11.8},
-    {name:"Tau Ceti", r_ly:11.9}
+    {name:"Proxima Centauri", r_ly:4.2465, ra_deg:217.4287, dec_deg:-62.6794},
+    {name:"Alpha Centauri A/B", r_ly:4.367, ra_deg:219.9021, dec_deg:-60.8339},
+    {name:"Barnard's Star", r_ly:5.963, ra_deg:269.4521, dec_deg:4.6933},
+    {name:"Wolf 359", r_ly:7.86, ra_deg:164.1217, dec_deg:7.0147},
+    {name:"Lalande 21185", r_ly:8.31, ra_deg:165.8342, dec_deg:35.97},
+    {name:"Sirius", r_ly:8.6, ra_deg:101.2871, dec_deg:-16.7161},
+    {name:"Ross 154", r_ly:9.69, ra_deg:282.4558, dec_deg:-23.8361},
+    {name:"Epsilon Eridani", r_ly:10.5, ra_deg:53.2325, dec_deg:-9.4583},
+    {name:"Epsilon Indi", r_ly:11.8, ra_deg:330.8404, dec_deg:-56.7861},
+    {name:"Tau Ceti", r_ly:11.9, ra_deg:26.0171, dec_deg:-15.9375}
   ];
 
   const presets = {
@@ -213,10 +214,29 @@
   }
   function getBodyByName(name){ return bodies.find(b=>b.name===name); }
 
-  // Distance between two catalog objects (or the one custom object), measured via their Sun distances.
-  // Same object -> 0. Within 10 AU of each other -> a [min,max] range (conjunction/opposition).
+  // Unit vector toward a star from its J2000 RA/Dec (degrees).
+  function starDirection(b){
+    const ra = b.ra_deg*Math.PI/180, dec = b.dec_deg*Math.PI/180;
+    return [Math.cos(dec)*Math.cos(ra), Math.cos(dec)*Math.sin(ra), Math.sin(dec)];
+  }
+  // True 3D distance between two catalog stars from their Sun distances and sky positions.
+  function starStarDistanceKm(a, b){
+    const ua = starDirection(a), ub = starDirection(b), ra = bodyDistanceKm(a), rb = bodyDistanceKm(b);
+    const dx = ra*ua[0]-rb*ub[0], dy = ra*ua[1]-rb*ub[1], dz = ra*ua[2]-rb*ub[2];
+    return Math.hypot(dx, dy, dz);
+  }
+
+  // Distance between two catalog objects (or the one custom object).
+  // Same object -> 0. Two stars -> exact 3D separation. Otherwise measured via Sun distances;
+  // within 10 AU of each other -> a [min,max] range (conjunction/opposition).
+  // A Custom object has no direction, so Custom-to-star or Custom-to-planet uses |r1-r2| as a lower bound.
   function pairDistancesKm(startName, endName, customKm){
     if(startName === endName) return {d_min:0, d_max:0, ranged:false, same:true};
+    const A = getBodyByName(startName), B = getBodyByName(endName);
+    if(A && B && A.ra_deg != null && B.ra_deg != null){
+      const d = starStarDistanceKm(A, B);
+      return {d_min:d, d_max:d, ranged:false, same:false, exact3D:true};
+    }
     const r = n => n==='Custom' ? customKm : bodyDistanceKm(getBodyByName(n));
     const rs = r(startName), re = r(endName);
     const d_min = Math.abs(re - rs);
